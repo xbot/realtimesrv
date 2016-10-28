@@ -1,0 +1,183 @@
+<?php
+require_once 'config.php';
+require_once './vendor/autoload.php';
+require_once './lib/SessionRegistry.php';
+
+use Workerman\Worker;
+use lib\SessionRegistry as SessReg;
+use Workerman\Lib\Timer;
+
+!defined('MN_BUS_WORK')                and define('MN_BUS_WORK',                'work_bus');
+!defined('MN_MSG_WORK_UPDATED')        and define('MN_MSG_WORK_UPDATED',        'work_updated');
+!defined('MN_MSG_HANDOVER_POSSESSION') and define('MN_MSG_HANDOVER_POSSESSION', 'handover_possession');
+
+$channelServer = new Channel\Server('127.0.0.1', MN_CHANNEL_PORT);
+$worker        = new Worker('websocket://0.0.0.0:'.MN_PORT);
+
+$worker->onWorkerStart = function($worker) {
+    // 清空Redis里的会话记录
+    try {
+        SessReg::clear();
+    } catch (RedisException $e) {
+        error_log("无法清空会话：".$e->getMessage());
+    }
+
+    Channel\Client::connect('127.0.0.1', MN_CHANNEL_PORT);
+
+    // 画布消息总线
+    Channel\Client::on(MN_BUS_WORK, function($event) use ($worker) {
+        if (empty($event['data']['fromConn']) || empty($event['data']['workId'])) {
+            error_log('画布总线收到的事件数据格式错误：'.var_export($event, true));
+            return;
+        }
+
+        $fromConn = $event['data']['fromConn'];
+        unset($event['data']['fromConn']);
+
+        $connIds = array();
+        try {
+            $connIds = SessReg::getByWork($event['data']['workId']);
+        } catch (RedisException $e) {
+            error_log('画布总线错误：'.$e->getMessage());
+        }
+        foreach ($connIds as $connId) {
+            if ($connId != $fromConn && isset($worker->connections[$connId])) {
+                $conn = $worker->connections[$connId];
+                $conn->send(json_encode($event));
+            }
+        }
+
+        if (isset($worker->connections[$fromConn])) {
+            $event['success'] = true;
+            $conn = $worker->connections[$fromConn];
+            $conn->send(json_encode($event));
+        }
+    });
+
+    // 心跳
+    Timer::add(MN_HEARTBEAT_INTERVAL, function() use ($worker) {
+        $timeNow = time();
+        foreach($worker->connections as $connection) {
+            // 有可能该connection还没收到过消息，则lastMessageTime设置为当前时间
+            if (empty($connection->lastMessageTime)) {
+                $connection->lastMessageTime = $timeNow;
+                continue;
+            }
+            // 上次通讯时间间隔大于心跳间隔，则认为客户端已经下线，关闭连接
+            if ($timeNow - $connection->lastMessageTime > MN_HEARTBEAT_THRESHOLD) {
+                $connection->close();
+            }
+        }
+    });
+};
+
+$worker->onClose = function($connection) {
+    // 从会话中删除和本连接相关的数据
+    try {
+        $workIds = SessReg::getByConn($connection->id);
+        foreach ($workIds as $workId) {
+            $connIds = SessReg::deleteFromWork($workId, $connection->id);
+            if (empty($connIds))
+                SessReg::deleteByWork($workId);
+        }
+        SessReg::deleteByConn($connection->id);
+    } catch (RedisException $e) {
+        error_log('无法删除会话中本连接的数据：'.$e->getMessage());
+    }
+};
+
+$worker->onMessage = function($connection, $data) {
+    $msg = json_decode($data, true);
+    if (!empty($msg['type'])) {
+        if (empty($msg['data']['token'])) {
+            error_log('接收数据缺少token：'.var_export($data, true));
+            $msg['success'] = false;
+            $msg['message'] = '缺少token';
+            $connection->send(json_encode($msg));
+            return;
+        }
+        if (empty($msg['data']['workId'])) {
+            error_log('接收数据缺少画布ID：'.var_export($data, true));
+            $msg['success'] = false;
+            $msg['message'] = '缺少画布ID';
+            $connection->send(json_encode($msg));
+            return;
+        }
+        // 通过TOKEN取用户信息
+        $response = \Httpful\Request::get(MN_DOMAIN.'/api/user')
+            ->addHeader('authorization', $msg['data']['token'])
+            ->send();
+        if (empty($response->body->user)) {
+            error_log('Token验证失败：'.json_encode($response->body));
+            $msg['success'] = false;
+            $msg['message'] = 'Token验证失败';
+            $connection->send(json_encode($msg));
+            return;
+        }
+
+        // 建立画布和连接的关联关系
+        try {
+            SessReg::newEntry($msg['data']['workId'], $connection->id);
+        } catch (RedisException $e) {
+            error_log('建立画布和连接的关联关系失败：'.$e->getMessage());
+        }
+
+        switch ($msg['type']) {
+            case MN_MSG_WORK_UPDATED:
+                // 画布更新
+
+                if (empty($msg['data']['workData'])) {
+                    error_log('接收数据缺少画布数据：'.var_export($data, true));
+                    $msg['success'] = false;
+                    $msg['message'] = '缺少画布数据';
+                    $connection->send(json_encode($msg));
+                    return;
+                }
+
+                // 同步更新到数据库
+                $response = \Httpful\Request::post(MN_DOMAIN."/api/work/{$msg['data']['workId']}")
+                    ->sendsJson()
+                    ->addHeader('authorization', $msg['data']['token'])
+                    ->body($msg['data']['workData'])
+                    ->send();
+                // 更新数据库失败时不再分发
+                if ($response->code != 200) {
+                    error_log("更新画布到数据库失败：{$response->code}");
+                    $msg['success'] = false;
+                    $msg['message'] = '画布保存失败';
+                    $connection->send(json_encode($msg));
+                    return;
+                }
+
+                $msg['data']['fromConn'] = $connection->id;
+                Channel\Client::publish(MN_BUS_WORK, $msg);
+                break;
+            case MN_MSG_HANDOVER_POSSESSION:
+                // 转交画布修改权
+            
+                // 调用REST接口处理交权逻辑
+                $response = \Httpful\Request::post(MN_DOMAIN."/api/work/changeupdater/{$msg['data']['workId']}")
+                    ->addHeader('authorization', $msg['data']['token'])
+                    ->send();
+                // 更新数据库失败时不再分发
+                if ($response->code != 200) {
+                    error_log("转交画布修改权失败：{$response->code}");
+                    $msg['success'] = false;
+                    $msg['message'] = '转交画布修改权失败';
+                    $connection->send(json_encode($msg));
+                    return;
+                }
+
+                $msg['data']['fromConn'] = $connection->id;
+                Channel\Client::publish(MN_BUS_WORK, $msg);
+                break;
+            default:
+                break;
+        }
+    } else {
+        error_log('接收数据格式不正确：'.var_export($data, true));
+        $connection->send(json_encode(array('success' => false, 'message' => '未知的请求类型',)));
+    }
+};
+
+Worker::runAll();

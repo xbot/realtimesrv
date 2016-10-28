@@ -1,0 +1,13 @@
+{
+    "require": {
+        "workerman/workerman": "^3.3",
+        "workerman/channel": "^1.0",
+        "nategood/httpful": "^0.2.20"
+    },
+    "repositories": {
+        "packagist": {
+            "type": "composer",
+            "url": "https://packagist.phpcomposer.com"
+        }
+    }
+}
