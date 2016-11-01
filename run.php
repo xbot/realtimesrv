@@ -8,6 +8,7 @@ use lib\SessionRegistry as SessReg;
 use Workerman\Lib\Timer;
 
 !defined('MN_BUS_WORK')                and define('MN_BUS_WORK',                'work_bus');
+!defined('MN_MSG_WORK_WATCH')          and define('MN_MSG_WORK_WATCH',          'watch_work');
 !defined('MN_MSG_WORK_UPDATED')        and define('MN_MSG_WORK_UPDATED',        'work_updated');
 !defined('MN_MSG_HANDOVER_POSSESSION') and define('MN_MSG_HANDOVER_POSSESSION', 'handover_possession');
 
@@ -123,6 +124,11 @@ $worker->onMessage = function($connection, $data) {
         }
 
         switch ($msg['type']) {
+            case MN_MSG_WORK_WATCH:
+                // 关注画布
+                $msg['data']['fromConn'] = $connection->id;
+                Channel\Client::publish(MN_BUS_WORK, $msg);
+                break;
             case MN_MSG_WORK_UPDATED:
                 // 画布更新
 
