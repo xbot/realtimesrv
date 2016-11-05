@@ -130,10 +130,11 @@ $worker->onMessage = function($connection, $data) {
             Comm::send($connection, $msg);
             return;
         }
+        $userObj = $response->body->user;
 
         // 建立画布、连接和用户的关联关系
         try {
-            SessReg::newEntry($msg['data']['workId'], $connection->id, $response->body->user);
+            SessReg::newEntry($msg['data']['workId'], $connection->id, $userObj);
         } catch (RedisException $e) {
             error_log('建立画布和连接的关联关系失败：'.$e->getMessage());
         }
@@ -186,34 +187,7 @@ $worker->onMessage = function($connection, $data) {
                 break;
             case MN_MSG_HANDOVER_POSSESSION:
                 // 转交画布修改权
-            
-                // 调用REST接口处理交权逻辑
-                $response = \Httpful\Request::post(MN_DOMAIN."/api/work/changeupdater/{$msg['data']['workId']}")
-                    ->addHeader('authorization', $msg['data']['token'])
-                    ->send();
-                // 更新数据库失败时不再分发
-                if ($response->code != 200) {
-                    error_log("转交画布修改权失败：{$response->code}");
-                    $msg['success'] = false;
-                    $msg['message'] = '转交画布修改权失败';
-                    Comm::send($connection, $msg);
-                    return;
-                }
-
-                try {
-                    $userObj = SessReg::getUser($connection->id);
-                } catch (RedisException $e) {
-                    error_log("通过连接ID{$connection->id}取用户信息失败（redis）：".$e->getMessage());
-                }
-                if (empty($userObj)) {
-                    error_log("通过连接ID{$connection->id}取用户信息失败：".var_export($userObj, true));
-                    $msg['success'] = false;
-                    $msg['message'] = '连接对应的用户不存在';
-                    Comm::send($connection, $msg);
-                    return;
-                }
-                $msg['data']['phone'] = $userObj->phone;
-
+                $msg['data']['phone']    = $userObj->phone;
                 $msg['data']['fromConn'] = $connection->id;
                 Channel\Client::publish(MN_BUS_WORK, $msg);
                 break;
