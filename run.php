@@ -212,7 +212,7 @@ $worker->onMessage = function($connection, $data) {
                     Comm::send($connection, $msg);
                     return;
                 }
-                $msg['data']['userId'] = $userObj->user_id;
+                $msg['data']['phone'] = $userObj->phone;
 
                 $msg['data']['fromConn'] = $connection->id;
                 Channel\Client::publish(MN_BUS_WORK, $msg);
