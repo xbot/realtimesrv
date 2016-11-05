@@ -187,7 +187,6 @@ $worker->onMessage = function($connection, $data) {
                 break;
             case MN_MSG_HANDOVER_POSSESSION:
                 // 转交画布修改权
-                $msg['data']['phone']    = $userObj->phone;
                 $msg['data']['fromConn'] = $connection->id;
                 Channel\Client::publish(MN_BUS_WORK, $msg);
                 break;
