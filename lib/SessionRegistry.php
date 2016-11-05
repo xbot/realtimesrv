@@ -71,18 +71,34 @@ class SessionRegistry
     /**
      * 建立画布和WS连接的映射关系
      *
-     * @param  int $workId 画布ID
-     * @param  int $connId WS连接ID
+     * @param int    $workId  画布ID
+     * @param int    $connId  WS连接ID
+     * @param object $userObj 用户数据对象
      * @return void
      */
-    public static function newEntry($workId, $connId)
+    public static function newEntry($workId, $connId, $userObj)
     {
         // 画布和连接的对应关系
-        $key = 'worksession_conns_'.$workId;
+        $key = "worksession_conns_{$workId}";
         self::getInstance()->sadd($key, $connId);
         // 连接和画布的对应关系
-        $key = 'worksession_works_'.$connId;
+        $key = "worksession_works_{$connId}";
         self::getInstance()->sadd($key, $workId);
+        // 连接和用户的对应关系
+        $key = "worksession_user_{$connId}";
+        self::getInstance()->set($key, json_encode($userObj));
+    }
+
+    /**
+     * 通过连接ID取用户信息
+     *
+     * @param  int $connId WebSocket连接ID
+     * @return object
+     */
+    public static function getUser($connId)
+    {
+        $key = "worksession_user_{$connId}";
+        return json_decode(self::getInstance()->get($key));
     }
     
     /**
@@ -93,8 +109,8 @@ class SessionRegistry
      */
     public static function getByWork($workId)
     {
-        $listKey = 'worksession_conns_'.$workId;
-        return self::getInstance()->smembers($listKey, 0, -1);
+        $key = "worksession_conns_{$workId}";
+        return self::getInstance()->smembers($key, 0, -1);
     }
     
     /**
@@ -105,8 +121,8 @@ class SessionRegistry
      */
     public static function getByConn($connId)
     {
-        $listKey = 'worksession_works_'.$connId;
-        return self::getInstance()->smembers($listKey, 0, -1);
+        $key = "worksession_works_{$connId}";
+        return self::getInstance()->smembers($key, 0, -1);
     }
 
     /**
@@ -118,8 +134,8 @@ class SessionRegistry
      */
     public static function deleteFromWork($workId, $connId)
     {
-        $listKey = 'worksession_conns_'.$workId;
-        self::getInstance()->srem($listKey, $connId);
+        $key = "worksession_conns_{$workId}";
+        self::getInstance()->srem($key, $connId);
         return self::getByWork($workId);
     }
     
@@ -131,8 +147,8 @@ class SessionRegistry
      */
     public static function deleteByWork($workId)
     {
-        $listKey = 'worksession_conns_'.$workId;
-        self::getInstance()->del($listKey);
+        $key = "worksession_conns_{$workId}";
+        self::getInstance()->del($key);
     }
 
     /**
@@ -143,7 +159,9 @@ class SessionRegistry
      */
     public static function deleteByConn($connId)
     {
-        $listKey = 'worksession_works_'.$connId;
-        self::getInstance()->del($listKey);
+        $key = "worksession_works_{$connId}";
+        self::getInstance()->del($key);
+        $key = "worksession_user_{$connId}";
+        self::getInstance()->del($key);
     }
 }
