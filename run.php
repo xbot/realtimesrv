@@ -200,6 +200,9 @@ $worker->onMessage = function($connection, $data) {
                 Channel\Client::publish(MN_BUS_WORK, $msg);
                 break;
             default:
+                // 通用画布消息分发接口
+                $msg['data']['fromConn'] = $connection->id;
+                Channel\Client::publish(MN_BUS_WORK, $msg);
                 break;
         }
     } else {
