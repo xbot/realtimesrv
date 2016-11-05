@@ -187,6 +187,15 @@ $worker->onMessage = function($connection, $data) {
                 break;
             case MN_MSG_HANDOVER_POSSESSION:
                 // 转交画布修改权
+
+                if (empty($msg['data']['phone'])) {
+                    error_log('接收数据缺少用户phone：'.var_export($data, true));
+                    $msg['success'] = false;
+                    $msg['message'] = '缺少用户电话';
+                    Comm::send($connection, $msg);
+                    return;
+                }
+
                 $msg['data']['fromConn'] = $connection->id;
                 Channel\Client::publish(MN_BUS_WORK, $msg);
                 break;
