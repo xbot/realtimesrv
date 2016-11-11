@@ -13,7 +13,7 @@ class SessionRegistry
 
     private function __construct() {
         $this->_redis = new \Redis();
-        $this->_redis->connect(MN_REDIS_IP, MN_REDIS_PORT);
+        $this->_redis->pconnect(MN_REDIS_IP, MN_REDIS_PORT);
     }
     private function __clone() {}
     
@@ -25,35 +25,21 @@ class SessionRegistry
         return self::$_instance;
     }
 
-    public function keys($pattern='*')
+    public static function resetInstance()
     {
-        return $this->_redis->keys($pattern);
+        self::$_instance = null;
     }
-    public function del($key)
+
+    public function __call($method, $params)
     {
-        $this->_redis->del($key);
+        if (method_exists($this->_redis, $method)) {
+            return call_user_func_array(array($this->_redis, $method), $params);
+        } else {
+            error_log("Redis方法不存在：{$method}\n");
+            return null;
+        }
     }
-    public function sadd($key, $value)
-    {
-        $this->_redis->sadd($key, $value);
-    }
-    public function srem($key, $value)
-    {
-        $this->_redis->srem($key, $value);
-    }
-    public function smembers($key)
-    {
-        return $this->_redis->smembers($key);
-    }
-    public function set($key, $value)
-    {
-        $this->_redis->set($key, $value);
-    }
-    public function get($key)
-    {
-        return $this->_redis->get($key);
-    }
-    
+
     /**
      * 清空Redis中存储的本类数据
      *
@@ -61,7 +47,7 @@ class SessionRegistry
      */
     public static function clear()
     {
-        $keys = self::getInstance()->keys();
+        $keys = self::getInstance()->keys('*');
         foreach ($keys as $key) {
             if (strpos($key, 'worksession_') === 0)
                 self::getInstance()->del($key);
@@ -110,7 +96,8 @@ class SessionRegistry
     public static function getByWork($workId)
     {
         $key = "worksession_conns_{$workId}";
-        return self::getInstance()->smembers($key, 0, -1);
+        $tmp = self::getInstance()->smembers($key);
+        return is_array($tmp) ? $tmp : array();
     }
     
     /**
@@ -122,7 +109,8 @@ class SessionRegistry
     public static function getByConn($connId)
     {
         $key = "worksession_works_{$connId}";
-        return self::getInstance()->smembers($key, 0, -1);
+        $tmp = self::getInstance()->smembers($key);
+        return is_array($tmp) ? $tmp : array();
     }
 
     /**

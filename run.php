@@ -136,7 +136,12 @@ $worker->onMessage = function($connection, $data) {
         try {
             SessReg::newEntry($msg['data']['workId'], $connection->id, $userObj);
         } catch (RedisException $e) {
+            SessReg::resetInstance();
             error_log('建立画布和连接的关联关系失败：'.$e->getMessage());
+            $msg['success'] = false;
+            $msg['message'] = '操作Redis失败';
+            Comm::send($connection, $msg);
+            return;
         }
 
         switch ($msg['type']) {
