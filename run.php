@@ -26,6 +26,7 @@ $worker->onWorkerStart = function($worker) {
     try {
         SessReg::clear();
     } catch (RedisException $e) {
+        SessReg::resetInstance();
         error_log("无法清空会话：".$e->getMessage());
     }
 
@@ -45,6 +46,7 @@ $worker->onWorkerStart = function($worker) {
         try {
             $connIds = SessReg::getByWork($event['data']['workId']);
         } catch (RedisException $e) {
+            SessReg::resetInstance();
             error_log('画布总线错误：'.$e->getMessage());
         }
         foreach ($connIds as $connId) {
@@ -97,6 +99,7 @@ $worker->onClose = function($connection) use ($worker) {
         }
         SessReg::deleteByConn($connection->id);
     } catch (RedisException $e) {
+        SessReg::resetInstance();
         error_log('无法删除会话中本连接的数据：'.$e->getMessage());
     }
 };
