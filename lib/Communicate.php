@@ -17,7 +17,8 @@ class Communicate
     public static function send($conn, $msg)
     {
         $status = $conn->send(json_encode($msg));
-        $conn->lastMessageTime = $status ? time() : 0;
+        // $conn->lastMessageTime = $status ? time() : 0;
+        if ($status) $conn->lastMessageTime = time();
         return $status;
     }
     

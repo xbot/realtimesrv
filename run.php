@@ -71,6 +71,8 @@ $worker->onWorkerStart = function($worker) {
             }
             // 上次通讯时间间隔大于心跳间隔，则认为客户端已经下线，关闭连接
             if ($timeNow - $connection->lastMessageTime > MN_HEARTBEAT_THRESHOLD) {
+                error_log("连接{$connection->id}最近消息时间戳是{$connection->lastMessageTime}，超过".MN_HEARTBEAT_THRESHOLD."，在
+            {$timeNow}断开");
                 $connection->close();
             }
         }
