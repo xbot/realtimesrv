@@ -1,3 +1,7 @@
 *.log
 *.swp
 vendor
+GPATH
+GRTAGS
+GTAGS
+tags

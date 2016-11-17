@@ -1,6 +1,8 @@
 <?php
 namespace lib;
 
+use Workerman\Lib\Timer;
+
 /**
  * Class SessionRegistry
  * @author Donie
@@ -73,6 +75,35 @@ class SessionRegistry
         // 连接和用户的对应关系
         $key = "worksession_user_{$connId}";
         self::getInstance()->set($key, json_encode($userObj));
+        // 如果画布缓存存在，设置缓存未过期
+        if (!empty(self::getWorkCache($workId))) self::renewWorkCache($workId);
+        // 画布和定时器的对应关系
+        $key = "worksession_timer_{$workId}";
+        $timerId = self::getInstance()->get($key);
+        if (!$timerId) {
+            $timerId = Timer::add(MN_WORK_UPDATE_INTERVAL, function() use (&$timerId, &$workId) {
+                $cacheData = self::getWorkCache($workId);
+                if (!empty($cacheData['workData']) && !empty($cacheData['token'])) {
+                    $response = \Httpful\Request::post(MN_DOMAIN."/api/work/{$workId}")
+                        ->sendsJson()
+                        ->addHeader('authorization', $cacheData['token'])
+                        ->body($cacheData['workData'])
+                        ->send();
+                    // 更新数据库失败时不再分发
+                    if ($response->code != 200)
+                        error_log("更新画布到数据库失败：{$response->code}");
+                }
+                // 若缓存已被置为过期，删除缓存数据并销毁定时器
+                if (!empty($cacheData['obsolete'])) {
+                    Timer::del($timerId);
+                    $key = "worksession_timer_{$workId}";
+                    self::getInstance()->del($key);
+                    $key = "worksession_workcache_{$workId}";
+                    self::getInstance()->del($key);
+                }
+            });
+            self::getInstance()->set($key, $timerId);
+        }
     }
 
     /**
@@ -128,7 +159,7 @@ class SessionRegistry
     }
     
     /**
-     * 删除画布对应的连接ID数组
+     * 删除画布对应的连接ID数组、缓存的画布数据和定时器
      *
      * @param  int $workId 画布ID
      * @return void
@@ -137,6 +168,8 @@ class SessionRegistry
     {
         $key = "worksession_conns_{$workId}";
         self::getInstance()->del($key);
+        // 标记画布缓存已失效，在下一次定时器执行后启动自毁逻辑
+        self::obsoleteWorkCache($workId);
     }
 
     /**
@@ -151,5 +184,59 @@ class SessionRegistry
         self::getInstance()->del($key);
         $key = "worksession_user_{$connId}";
         self::getInstance()->del($key);
+    }
+
+    /**
+     * 缓存画布数据
+     *
+     * @param  string $workId   画布ID
+     * @param  string $workData 画布数据
+     * @param  string $token    口令
+     * @return void
+     */
+    public static function saveWorkCache($workId, $workData, $token)
+    {
+        $key = "worksession_workcache_{$workId}";
+        $status1 = self::getInstance()->hset($key, 'workData', $workData);
+        $status2 = self::getInstance()->hset($key, 'token', $token);
+        return $status1 !== false && $status2 !== false;
+    }
+    
+    /**
+     * 取缓存的画布数据
+     *
+     * @param  string $workId 画布ID
+     * @return array
+     */
+    public static function getWorkCache($workId)
+    {
+        $key = "worksession_workcache_{$workId}";
+        return self::getInstance()->hgetall($key);
+    }
+    
+    /**
+     * 删除所有画布数据时标记画布缓存即将过期，当下一次计时器执行后自行销毁
+     *
+     * @param  string $workId 画布ID
+     * @return bool
+     */
+    public static function obsoleteWorkCache($workId)
+    {
+        $key = "worksession_workcache_{$workId}";
+        $status = self::getInstance()->hset($key, 'obsolete', 1);
+        return $status !== false;
+    }
+    
+    /**
+     * 创建会话时设置画布缓存未过期
+     *
+     * @param  string $workId 画布ID
+     * @return bool
+     */
+    public static function renewWorkCache($workId)
+    {
+        $key = "worksession_workcache_{$workId}";
+        $status = self::getInstance()->hset($key, 'obsolete', 0);
+        return $status !== false;
     }
 }

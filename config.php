@@ -17,3 +17,5 @@
 !defined('MN_HEARTBEAT_INTERVAL') and define('MN_HEARTBEAT_INTERVAL', 60);
 // 心跳阈值，超过n秒无通讯的连接将被关闭
 !defined('MN_HEARTBEAT_THRESHOLD') and define('MN_HEARTBEAT_THRESHOLD', 7200);
+// 画布数据更新时间间隔
+!defined('MN_WORK_UPDATE_INTERVAL') and define('MN_WORK_UPDATE_INTERVAL', 15);

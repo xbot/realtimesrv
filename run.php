@@ -175,22 +175,10 @@ $worker->onMessage = function($connection, $data) {
                     return;
                 }
 
-                // 同步更新到数据库
-                $workData = $msg['data']['workData'];
-                if (!is_string($workData)) $workData = json_encode($workData);
-                $response = \Httpful\Request::post(MN_DOMAIN."/api/work/{$msg['data']['workId']}")
-                    ->sendsJson()
-                    ->addHeader('authorization', $msg['data']['token'])
-                    ->body($workData)
-                    ->send();
-                // 更新数据库失败时不再分发
-                if ($response->code != 200) {
-                    error_log("更新画布到数据库失败：{$response->code}");
-                    $msg['success'] = false;
-                    $msg['message'] = '画布保存失败';
-                    Comm::send($connection, $msg);
-                    return;
-                }
+                // 缓存画布数据
+                $workData = is_string($msg['data']['workData']) ? $msg['data']['workData'] : json_encode($msg['data']['workData']);
+                $status = SessReg::saveWorkCache($msg['data']['workId'], $workData, $msg['data']['token']);
+                if (!$status) error_log("缓存画布{$msg['data']['workId']}数据失败");
 
                 $msg['data']['fromConn'] = $connection->id;
                 Channel\Client::publish(MN_BUS_WORK, $msg);
