@@ -3,6 +3,8 @@
  * 如果本程序和主站在同一台主机，注意配置服务器HOSTS，映射域名MN_DOMAIN到本机
  */
 
+// 是否开启跟踪日志
+!defined('MN_DEBUG') and define('MN_DEBUG', 1);
 // 监听端口
 !defined('MN_PORT') and define('MN_PORT', 4759);
 // Channel监听端口

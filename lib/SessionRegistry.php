@@ -37,7 +37,7 @@ class SessionRegistry
         if (method_exists($this->_redis, $method)) {
             return call_user_func_array(array($this->_redis, $method), $params);
         } else {
-            error_log("Redis方法不存在：{$method}\n");
+            error_log("ERROR: Redis方法不存在：{$method}\n");
             return null;
         }
     }
@@ -75,35 +75,6 @@ class SessionRegistry
         // 连接和用户的对应关系
         $key = "worksession_user_{$connId}";
         self::getInstance()->set($key, json_encode($userObj));
-        // 如果画布缓存存在，设置缓存未过期
-        if (!empty(self::getWorkCache($workId))) self::renewWorkCache($workId);
-        // 画布和定时器的对应关系
-        $key = "worksession_timer_{$workId}";
-        $timerId = self::getInstance()->get($key);
-        if (!$timerId) {
-            $timerId = Timer::add(MN_WORK_UPDATE_INTERVAL, function() use (&$timerId, &$workId) {
-                $cacheData = self::getWorkCache($workId);
-                if (!empty($cacheData['workData']) && !empty($cacheData['token'])) {
-                    $response = \Httpful\Request::post(MN_DOMAIN."/api/work/{$workId}")
-                        ->sendsJson()
-                        ->addHeader('authorization', $cacheData['token'])
-                        ->body($cacheData['workData'])
-                        ->send();
-                    // 更新数据库失败时不再分发
-                    if ($response->code != 200)
-                        error_log("更新画布到数据库失败：{$response->code}");
-                }
-                // 若缓存已被置为过期，删除缓存数据并销毁定时器
-                if (!empty($cacheData['obsolete'])) {
-                    Timer::del($timerId);
-                    $key = "worksession_timer_{$workId}";
-                    self::getInstance()->del($key);
-                    $key = "worksession_workcache_{$workId}";
-                    self::getInstance()->del($key);
-                }
-            });
-            self::getInstance()->set($key, $timerId);
-        }
     }
 
     /**
@@ -192,14 +163,18 @@ class SessionRegistry
      * @param  string $workId   画布ID
      * @param  string $workData 画布数据
      * @param  string $token    口令
+     * @param  float  $version  数据版本
      * @return void
      */
-    public static function saveWorkCache($workId, $workData, $token)
+    public static function saveWorkCache($workId, $workData, $token, $version)
     {
         $key = "worksession_workcache_{$workId}";
         $status1 = self::getInstance()->hset($key, 'workData', $workData);
         $status2 = self::getInstance()->hset($key, 'token', $token);
-        return $status1 !== false && $status2 !== false;
+        $status3 = self::getInstance()->hset($key, 'version', $version);
+        $status4 = self::renewWorkCache($workId);
+        self::getInstance()->expire($key, MN_WORK_UPDATE_INTERVAL * 3);
+        return $status1 !== false && $status2 !== false && $status3 !== false && $status4 !== false;
     }
     
     /**
@@ -239,4 +214,60 @@ class SessionRegistry
         $status = self::getInstance()->hset($key, 'obsolete', 0);
         return $status !== false;
     }
+
+    /**
+     * 注册保存画布缓存到数据库的定时器
+     *
+     * @param  string $workId 画布ID
+     * @return void
+     */
+    public static function registerUpdateTimer($workId)
+    {
+        // 画布和定时器的对应关系
+        $key = "worksession_timer_{$workId}";
+        $timerId = self::getInstance()->get($key);
+        if (!$timerId) {
+            $timerId = Timer::add(MN_WORK_UPDATE_INTERVAL, function() use (&$timerId, &$workId) {
+                // 提交画布缓存
+                self::submitWorkCache($workId);
+                // 若缓存已被置为过期，删除缓存数据并销毁定时器
+                $cacheData = self::getWorkCache($workId);
+                if (!empty($cacheData['obsolete'])) {
+                    Timer::del($timerId);
+                    $key = "worksession_timer_{$workId}";
+                    self::getInstance()->del($key);
+                    $key = "worksession_workcache_{$workId}";
+                    self::getInstance()->del($key);
+                }
+            });
+            self::getInstance()->set($key, $timerId);
+        }
+    }
+    
+    /**
+     * 提交画布缓存，更新到数据库
+     *
+     * @param  string $workId 画布ID
+     * @return void
+     */
+    public static function submitWorkCache($workId)
+    {
+        $cacheData = self::getWorkCache($workId);
+        if (!empty($cacheData['workData']) && !empty($cacheData['token'])) {
+            $response = \Httpful\Request::post(MN_DOMAIN."/api/work/{$workId}")
+                ->sendsJson()
+                ->addHeader('authorization', $cacheData['token'])
+                ->body($cacheData['workData'])
+                ->send();
+            // 更新数据库失败时不再分发
+            if ($response->code != 200)
+                error_log("ERROR: 画布 {$workId}@".MN_MSG_WORK_UPDATED."@{$cacheData['version']} 保存到数据库失败：{$response->code}");
+            else {
+                if (MN_DEBUG) {
+                    error_log("DEBUG: 画布 {$workId}@".MN_MSG_WORK_UPDATED."@{$cacheData['version']} 已保存到数据库");
+                }
+            }
+        }
+    }
+    
 }

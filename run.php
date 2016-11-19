@@ -27,7 +27,7 @@ $worker->onWorkerStart = function($worker) {
         SessReg::clear();
     } catch (RedisException $e) {
         SessReg::resetInstance();
-        error_log("无法清空会话：".$e->getMessage());
+        error_log("ERROR: 无法清空会话：".$e->getMessage());
     }
 
     Channel\Client::connect('127.0.0.1', MN_CHANNEL_PORT);
@@ -35,7 +35,7 @@ $worker->onWorkerStart = function($worker) {
     // 画布消息总线
     Channel\Client::on(MN_BUS_WORK, function($event) use ($worker) {
         if (empty($event['data']['fromConn']) || empty($event['data']['workId'])) {
-            error_log('画布总线收到的事件数据格式错误：'.var_export($event, true));
+            error_log('ERROR: 画布总线收到的事件数据格式错误：'.var_export($event, true));
             return;
         }
 
@@ -47,7 +47,7 @@ $worker->onWorkerStart = function($worker) {
             $connIds = SessReg::getByWork($event['data']['workId']);
         } catch (RedisException $e) {
             SessReg::resetInstance();
-            error_log('画布总线错误：'.$e->getMessage());
+            error_log('ERROR: 画布总线错误：'.$e->getMessage());
         }
         foreach ($connIds as $connId) {
             if ($connId != $fromConn && isset($worker->connections[$connId]))
@@ -71,7 +71,7 @@ $worker->onWorkerStart = function($worker) {
             }
             // 上次通讯时间间隔大于心跳间隔，则认为客户端已经下线，关闭连接
             if ($timeNow - $connection->lastMessageTime > MN_HEARTBEAT_THRESHOLD) {
-                error_log("连接{$connection->id}最近消息时间戳是{$connection->lastMessageTime}，超过".MN_HEARTBEAT_THRESHOLD."，在
+                error_log("ERROR: 连接{$connection->id}最近消息时间戳是{$connection->lastMessageTime}，超过".MN_HEARTBEAT_THRESHOLD."，在
             {$timeNow}断开");
                 $connection->close();
             }
@@ -102,7 +102,7 @@ $worker->onClose = function($connection) use ($worker) {
         SessReg::deleteByConn($connection->id);
     } catch (RedisException $e) {
         SessReg::resetInstance();
-        error_log('无法删除会话中本连接的数据：'.$e->getMessage());
+        error_log('ERROR: 无法删除会话中本连接的数据：'.$e->getMessage());
     }
 };
 
@@ -110,15 +110,21 @@ $worker->onMessage = function($connection, $data) {
     $connection->lastMessageTime = time();
     $msg = json_decode($data, true);
     if (!empty($msg['type'])) {
+        $msg['__debugInfo']['timestamp'] = microtime(true);
+
+        if (MN_DEBUG) {
+            error_log("DEBUG: 收到画布 ".(!empty($msg['data']['workId']) ? $msg['data']['workId'] : '?')."@".(!empty($msg['type']) ? $msg['type'] : '?')."@{$msg['__debugInfo']['timestamp']} 的请求");
+        }
+
         if (empty($msg['data']['token'])) {
-            error_log('接收数据缺少token：'.var_export($data, true));
+            error_log('ERROR: 接收数据缺少token：'.var_export($data, true));
             $msg['success'] = false;
             $msg['message'] = '缺少token';
             Comm::send($connection, $msg);
             return;
         }
         if (empty($msg['data']['workId'])) {
-            error_log('接收数据缺少画布ID：'.var_export($data, true));
+            error_log('ERROR: 接收数据缺少画布ID：'.var_export($data, true));
             $msg['success'] = false;
             $msg['message'] = '缺少画布ID';
             Comm::send($connection, $msg);
@@ -129,7 +135,7 @@ $worker->onMessage = function($connection, $data) {
             ->addHeader('authorization', $msg['data']['token'])
             ->send();
         if (empty($response->body->user)) {
-            error_log('Token验证失败：'.json_encode($response->body));
+            error_log('ERROR: Token验证失败：'.json_encode($response->body));
             $msg['success'] = false;
             $msg['message'] = 'Token验证失败';
             Comm::send($connection, $msg);
@@ -142,7 +148,7 @@ $worker->onMessage = function($connection, $data) {
             SessReg::newEntry($msg['data']['workId'], $connection->id, $userObj);
         } catch (RedisException $e) {
             SessReg::resetInstance();
-            error_log('建立画布和连接的关联关系失败：'.$e->getMessage());
+            error_log('ERROR: 建立画布和连接的关联关系失败：'.$e->getMessage());
             $msg['success'] = false;
             $msg['message'] = '操作Redis失败';
             Comm::send($connection, $msg);
@@ -154,7 +160,7 @@ $worker->onMessage = function($connection, $data) {
                 // 关注画布
 
                 if (empty($msg['data']['workData'])) {
-                    error_log('接收数据缺少画布数据：'.var_export($data, true));
+                    error_log('ERROR: 接收数据缺少画布数据：'.var_export($data, true));
                     $msg['success'] = false;
                     $msg['message'] = '缺少画布数据';
                     Comm::send($connection, $msg);
@@ -168,7 +174,7 @@ $worker->onMessage = function($connection, $data) {
                 // 画布更新
 
                 if (empty($msg['data']['workData'])) {
-                    error_log('接收数据缺少画布数据：'.var_export($data, true));
+                    error_log('ERROR: 接收数据缺少画布数据：'.var_export($data, true));
                     $msg['success'] = false;
                     $msg['message'] = '缺少画布数据';
                     Comm::send($connection, $msg);
@@ -177,8 +183,15 @@ $worker->onMessage = function($connection, $data) {
 
                 // 缓存画布数据
                 $workData = is_string($msg['data']['workData']) ? $msg['data']['workData'] : json_encode($msg['data']['workData']);
-                $status = SessReg::saveWorkCache($msg['data']['workId'], $workData, $msg['data']['token']);
-                if (!$status) error_log("缓存画布{$msg['data']['workId']}数据失败");
+                $status = SessReg::saveWorkCache($msg['data']['workId'], $workData, $msg['data']['token'], $msg['__debugInfo']['timestamp']);
+                if (!$status) error_log("ERROR: 缓存画布{$msg['data']['workId']}数据失败");
+                else {
+                    if (MN_DEBUG)
+                        error_log("DEBUG: 画布 {$msg['data']['workId']}@{$msg['type']}@{$msg['__debugInfo']['timestamp']} 已缓存");
+                }
+
+                // 设置保存画布缓存到数据库的定时器
+                SessReg::registerUpdateTimer($msg['data']['workId']);
 
                 $msg['data']['fromConn'] = $connection->id;
                 Channel\Client::publish(MN_BUS_WORK, $msg);
@@ -187,12 +200,15 @@ $worker->onMessage = function($connection, $data) {
                 // 转交画布修改权
 
                 if (empty($msg['data']['phone'])) {
-                    error_log('接收数据缺少用户phone：'.var_export($data, true));
+                    error_log('ERROR: 接收数据缺少用户phone：'.var_export($data, true));
                     $msg['success'] = false;
                     $msg['message'] = '缺少用户电话';
                     Comm::send($connection, $msg);
                     return;
                 }
+
+                // 提交画布缓存到数据库
+                SessReg::submitWorkCache($msg['data']['workId']);
 
                 $msg['data']['fromConn'] = $connection->id;
                 Channel\Client::publish(MN_BUS_WORK, $msg);
@@ -204,7 +220,7 @@ $worker->onMessage = function($connection, $data) {
                 break;
         }
     } else {
-        error_log('接收数据格式不正确：'.var_export($data, true));
+        error_log('ERROR: 接收数据格式不正确：'.var_export($data, true));
         Comm::send($connection, json_encode(array('success' => false, 'message' => '未知的请求类型')));
     }
 };
