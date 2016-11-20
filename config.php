@@ -8,7 +8,7 @@
 // 监听端口
 !defined('MN_PORT') and define('MN_PORT', 4759);
 // 启动进程数，一般应为CPU核数的3倍
-!defined('MN_WORKER_NUM') and define('MN_WORKER_NUM', 6);
+!defined('MN_WORKER_NUM') and define('MN_WORKER_NUM', 1);
 // Redis IP
 !defined('MN_REDIS_IP') and define('MN_REDIS_IP', '127.0.0.1');
 // Redis 端口

@@ -75,7 +75,7 @@ $worker->onClose = function($connection) use ($worker) {
     }
 };
 
-$worker->onMessage = function($connection, $data) {
+$worker->onMessage = function($connection, $data) use ($worker) {
     $connection->lastMessageTime = time();
     $msg = json_decode($data, true);
     if (!empty($msg['type'])) {
