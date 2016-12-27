@@ -16,6 +16,7 @@ class SessionRegistry
     private function __construct() {
         $this->_redis = new \Redis();
         $this->_redis->pconnect(MN_REDIS_IP, MN_REDIS_PORT);
+        $this->_redis->auth(MN_REDIS_PASSWD);
     }
     private function __clone() {}
     
