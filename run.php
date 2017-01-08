@@ -51,6 +51,7 @@ $worker->onWorkerStart = function($worker) {
 $worker->onClose = function($connection) use ($worker) {
     // 从会话中删除和本连接相关的数据
     $msg = array('type' => MN_MSG_CONN_CLOSED, 'data' => array(),);
+    $msg['__debugInfo']['timestamp'] = microtime(true);
     try {
         $userObj = SessReg::getUser($connection->id);
         if (!empty($userObj->phone)) $msg['data']['phone'] = $userObj->phone;
