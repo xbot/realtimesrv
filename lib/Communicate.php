@@ -17,8 +17,11 @@ class Communicate
     public static function send($conn, $msg)
     {
         $status = $conn->send(json_encode($msg));
-        // $conn->lastMessageTime = $status ? time() : 0;
         if ($status) $conn->lastMessageTime = time();
+        if (MN_DEBUG)
+            error_log("DEBUG: 发送画布 ".(!empty($msg['data']['workId']) ? $msg['data']['workId'] : '?')
+            ."@".(!empty($msg['type']) ? $msg['type'] : '?')."@{$msg['__debugInfo']['timestamp']} 的请求到连接{$conn->id}"
+            .($status ? '成功' : '失败'));
         return $status;
     }
     
